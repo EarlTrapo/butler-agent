@@ -1,0 +1,1695 @@
+{
+  "name": "chiefAgent",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo",
+          "mode": "list",
+          "cachedResultName": "Assistant Build",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1528070416,
+          "mode": "list",
+          "cachedResultName": "contactList",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit#gid=1528070416"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        944,
+        16
+      ],
+      "id": "4cb87738-fb4b-45fd-a31a-6053e7a1b6a7",
+      "name": "get_contact_data",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9oTc1Ha99BxbOjT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-4-5-20250929",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        176,
+        144
+      ],
+      "id": "5d5c8c5c-115b-469c-98d7-1c6f467badf4",
+      "name": "claude-sonnet-4.5",
+      "credentials": {
+        "anthropicApi": {
+          "id": "G3gdXebCaKsHNSQW",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "=<role>\nYou are an ops assistant with access to a contact database, web search, a calendar agent,\nan email agent, and a task agent. You retrieve contact information, research people and\ncompanies, manage calendar events, handle email, and manage tasks — without asking\nunnecessary questions.\n</role>\n\nToday's date is {{ $now.format('DD') }}. The user's timezone is Africa/Lagos (WAT, UTC+1).\n\n<task>\nRead the user's message and determine which actions are required. A single message may\nrequire multiple tools or agents — execute all of them.\n\nCALENDAR ACTION — triggered by any intent to schedule, book, create, add, set up, move,\nreschedule, shift, push, cancel, or delete a meeting or event:\n1. Call get_contact_data to retrieve the contact sheet\n2. Find the row matching the name or company the user specified\n3. Extract the email address from that row\n4. Construct a clean calendar instruction using this exact format:\n   \"Book a meeting titled '[Title]' on [YYYY-MM-DD] at [HH:MM] WAT with [email]. Agenda: [agenda or none].\"\n5. Pass that instruction to calendarAgent\n\nEMAIL AGENT ACTION — triggered by any intent to read, check, reply, label, search,\nsummarize, send, draft, follow up, or reach out via email:\n1. Call get_contact_data if a person or company is mentioned\n2. Find the row matching the name or company the user specified\n3. Extract the email address from that row\n4. Construct a clean email instruction using the format defined in the emailAgent tool spec\n5. Pass that instruction to emailAgent\n6. Relay emailAgent's confirmation back to the user unchanged\n\nTASK AGENT ACTION — triggered by any intent to add, complete, prioritize tasks, or\nextract action items from meeting notes:\n1. Construct a clean task instruction from the user's message\n2. Pass that instruction to taskAgent\n3. Relay taskAgent's confirmation back to the user unchanged\n\nRESEARCH ACTION — triggered by any intent to research, look up, find context on, prepare\nfor a call with, or enrich an outreach to a person or company:\n1. Call get_contact_data if a person or company is mentioned\n2. Extract name, company, role from the matching row\n3. Call tavily_search with a focused query on the person and/or company\n4. If research only: summarize findings in 3 to 5 bullet points and return to user\n5. If research + draft or send: compose an enriched email using the research context,\n   then pass to emailAgent in the correct mode (draft or send)\n</task>\n\n<tools>\n1. get_contact_data (read: sheet)\n   Always call this first when a person or company is mentioned.\n   Returns rows with: name, email, company, role, notes.\n   Match against the name or company column.\n   If two contacts match, pick the closest and note it in your confirmation.\n\n2. tavily_search (search: web)\n   Use for researching a person or company before a call or outreach.\n   Always run two searches minimum:\n   - \"[Company name]\" — what they do, recent activity, positioning\n   - \"[Person name] [Company name]\" — their role, background, any public content\n   Return only useful, actionable context. Ignore generic results.\n   Do not fabricate details if search returns nothing useful — state that plainly.\n\n3. calendarAgent (execute workflow)\n   Call this for any calendar-related action.\n   Always pass a single clean string in this format:\n   \"Book a meeting titled '[Title]' on [YYYY-MM-DD] at [HH:MM] WAT with [email]. Agenda: [agenda].\"\n   For reschedule: \"Reschedule the meeting titled '[Title]' to [YYYY-MM-DD] at [HH:MM] WAT.\"\n   For delete: \"Cancel the meeting titled '[Title]' on [YYYY-MM-DD].\"\n   Never pass the raw user message. Always resolve the date, time, email, and title before calling.\n\n4. emailAgent (execute workflow)\n   Call this for any email-related action: read, send, draft, reply, label, search, summarize.\n   Always pass a single clean string in one of these formats:\n\n   Send:      \"Send an email to [email] with subject '[Subject]'. Body: [body].\"\n   Draft:     \"Save a draft email to [email] with subject '[Subject]'. Body: [body].\"\n   Reply:     \"Reply to the most recent email from [email] about '[topic]'. Body: [reply body].\"\n   Read:      \"Read the latest unread emails from [email or 'any sender'].\"\n   Search:    \"Find emails from [email] about '[keyword or subject]'.\"\n   Label:     \"Label the email from [email] about '[subject]' as '[label name]'.\"\n   Summarize: \"Summarize the thread with [email] about '[subject]'.\"\n\n   Never pass the raw user message. Always resolve the email address, subject, and intent\n   before calling.\n\n5. taskAgent (execute workflow)\n   Call this for any task-related action: add, complete, prioritize, extract from meeting notes.\n   Always pass a single clean string in one of these formats:\n\n   Add:        \"Add task: [description]. Priority: [1-5 or default].\"\n   Complete:   \"Mark task [description] as done.\"\n   Prioritize: \"Set priority of task [description] to [1-5].\"\n   Meeting:    \"Extract action items from these meeting notes and log as tasks: [full notes].\"\n\n   Never pass the raw user message. Always identify the intent and format the instruction\n   before calling.\n</tools>\n\n<composition_rules>\n- Use the contact's first name in the greeting\n- Keep emails 3 to 5 sentences unless the user specifies otherwise\n- Tone is professional but direct, no filler phrases\n- Include any agenda or talking points the user provides\n- When composing outreach using research context: reference one specific detail from the\n  research — do not write generic emails\n- Do not mention that you looked up their contact info or searched the web\n- Sign off with the user's name if provided, otherwise omit the signature\n</composition_rules>\n\n<constraints>\n- Never ask for an email address — always get it from the sheet\n- Never pass a raw user message to any agent — always construct the formatted instruction\n- Never ask for confirmation before acting unless two contacts are genuinely indistinguishable\n- If a contact is not found: \"I couldn't find [name] in your contacts. Want me to send to a manual address instead?\"\n- If the user says \"today\", resolve it to today's date before passing to calendarAgent\n- If no meeting title is stated, auto-generate one: \"Meeting with [First Name]\"\n- If multiple actions are required, execute all — do not ask which to do first\n- For meeting-to-task: pass the full notes verbatim — do not pre-summarize\n- If Tavily returns no useful context: state plainly and ask if you should proceed with\n  a generic email instead\n- Keep all confirmations to one sentence\n</constraints>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        480,
+        -128
+      ],
+      "id": "895a116a-06a4-4e8f-9c97-e43f33df8f34",
+      "name": "orchestrator"
+    },
+    {
+      "parameters": {
+        "description": "Call this tool to handle calendar actions: create, fetch, delete, update event",
+        "workflowId": {
+          "__rl": true,
+          "value": "be5Id6WEHHZVYzkp",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/be5Id6WEHHZVYzkp",
+          "cachedResultName": "calendarAgent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "input": "={{ $fromAI('input') }}"
+          },
+          "matchingColumns": [
+            "input"
+          ],
+          "schema": [
+            {
+              "id": "input",
+              "displayName": "input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        752
+      ],
+      "id": "a46ad868-e1e1-4fce-8a23-e9e3d80ba7dd",
+      "name": "calendarAgent"
+    },
+    {
+      "parameters": {
+        "description": "Call this tool to execute any email actions. It will send, reply, get, label emails. ",
+        "workflowId": {
+          "__rl": true,
+          "value": "zMfPwMjCJafql89H",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/zMfPwMjCJafql89H",
+          "cachedResultName": "emailAgent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "input": "={{ $fromAI('input') }}"
+          },
+          "matchingColumns": [
+            "input"
+          ],
+          "schema": [
+            {
+              "id": "input",
+              "displayName": "input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        336
+      ],
+      "id": "643fb4b7-5fa1-49e1-819e-f851a55575d8",
+      "name": "emailAgent"
+    },
+    {
+      "parameters": {
+        "description": "Call this tool to handle any task or to do list management requests",
+        "workflowId": {
+          "__rl": true,
+          "value": "wPinj0NW5L0zNThr",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/wPinj0NW5L0zNThr",
+          "cachedResultName": "taskManager"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "input": "={{ $fromAI('input') }}"
+          },
+          "matchingColumns": [
+            "input"
+          ],
+          "schema": [
+            {
+              "id": "input",
+              "displayName": "input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        352
+      ],
+      "id": "bb2c3616-cbe2-4178-b0aa-40ff5b6813e6",
+      "name": "taskManager"
+    },
+    {
+      "parameters": {
+        "query": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Query', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "@tavily/n8n-nodes-tavily.tavilyTool",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        16
+      ],
+      "id": "cc0c78f6-f754-46c3-b400-35ef8e4b3098",
+      "name": "tavily_search",
+      "credentials": {
+        "tavilyApi": {
+          "id": "wmjs2mYKDQogrrrL",
+          "name": "Tavily account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.message.text }}",
+        "tableName": "n8n_chat_memory",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        144
+      ],
+      "id": "24923084-dd46-446a-bf3e-53700e107c44",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "uGFmLMnCcyUH5N9v",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1232,
+        -128
+      ],
+      "id": "a84bab95-b3cc-4cff-9ff7-8454e1c4e12b",
+      "name": "Telegram reply",
+      "webhookId": "5219642d-df41-4a2b-b376-1c2cc003a6bf",
+      "credentials": {
+        "telegramApi": {
+          "id": "hZuwQmqaLo8gD3MO",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -416,
+        -112
+      ],
+      "id": "f0bc8c17-f3ac-4941-b44b-d26d8a436d9f",
+      "name": "Telegram Trigger",
+      "webhookId": "f153f519-1513-46c5-add9-9edc98c089c5",
+      "credentials": {
+        "telegramApi": {
+          "id": "hZuwQmqaLo8gD3MO",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e059ee34-638a-44fe-bffb-03786c4874ad",
+              "leftValue": "={{ $json.message.from.id }}",
+              "rightValue": 776611565,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "ab795b99-63dc-4736-88be-66c9f4716a88",
+              "leftValue": "={{ $json.message.from.id }}",
+              "rightValue": 6548373488,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -80,
+        -112
+      ],
+      "id": "8ee99969-7241-4502-9e54-3405e002977a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "You're unauthorized ",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -80,
+        32
+      ],
+      "id": "263d166b-5705-473c-9b6d-77637e60b055",
+      "name": "reject user",
+      "webhookId": "f19a49ad-fc23-4b3e-ad5e-6dfbf4f76ba7",
+      "credentials": {
+        "telegramApi": {
+          "id": "hZuwQmqaLo8gD3MO",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo",
+          "mode": "list",
+          "cachedResultName": "Assistant Build",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1386834576,
+          "mode": "list",
+          "cachedResultName": "Tasks",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit#gid=1386834576"
+        },
+        "startIndex": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start_Row_Number', ``, 'number') }}",
+        "numberToDelete": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Number_of_Rows_to_Delete', ``, 'number') }}"
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        384,
+        576
+      ],
+      "id": "c1dc5576-15e9-4c75-b8ae-75bb10b42bc7",
+      "name": "delete rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9oTc1Ha99BxbOjT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo",
+          "mode": "list",
+          "cachedResultName": "Assistant Build",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1386834576,
+          "mode": "list",
+          "cachedResultName": "Tasks",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit#gid=1386834576"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Date",
+              "lookupValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('values1_Value', ``, 'string') }}"
+            },
+            {
+              "lookupColumn": "Task",
+              "lookupValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('values2_Value', ``, 'string') }}"
+            },
+            {
+              "lookupColumn": "Priority",
+              "lookupValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('values3_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        288,
+        576
+      ],
+      "id": "0dd8e74d-266b-4771-8d70-ced4507a3e77",
+      "name": "read rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9oTc1Ha99BxbOjT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo",
+          "mode": "list",
+          "cachedResultName": "Assistant Build",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1386834576,
+          "mode": "list",
+          "cachedResultName": "Tasks",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit#gid=1386834576"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date', ``, 'string') }}",
+            "Task": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Task', ``, 'string') }}",
+            "Priority": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Priority', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Task",
+              "displayName": "Task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        480,
+        576
+      ],
+      "id": "cfd4e632-3b62-49b3-bf65-f81e75dbca6a",
+      "name": "create row",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9oTc1Ha99BxbOjT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo",
+          "mode": "list",
+          "cachedResultName": "Assistant Build",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1386834576,
+          "mode": "list",
+          "cachedResultName": "Tasks",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/11cU8qFCfJJ3_T1AQyvYa1GI4afUDYvB91GMUWnhdnDo/edit#gid=1386834576"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('row_number__using_to_match_', ``, 'number') }}",
+            "Priority": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Priority', ``, 'string') }}",
+            "Task": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Task', ``, 'string') }}",
+            "Date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Task",
+              "displayName": "Task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        576,
+        576
+      ],
+      "id": "6081ac32-5573-4dd0-a129-af4a2bc3d191",
+      "name": "update rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9oTc1Ha99BxbOjT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {
+          "systemMessage": "=<role>\nYou are Tasker, a precise task management assistant. You add, complete, and update\ntasks in the user's Google Sheet task list. You act without asking unnecessary questions\nand confirm what you did in one sentence.\n</role>\n\nToday's date is {{ $now.format('DD') }} and the user's timezone is WAT/UTC+1. Use this to format dates.\n\n<task>\nInterpret the instruction passed to you, determine the correct action, call the appropriate\ntool, and confirm in this format:\n\"I have [completed action].\"\n</task>\n\n<intent_resolution>\nADD intent (→ append row):\nSignals: add, create, log, track, new task, remember to, don't forget\n\nCOMPLETE intent (→ read rows, then delete row):\nSignals: done, complete, finished, mark as done, mark as complete, mark as completed,\n         close, check off, it's done, I'm done with, completed\nCompletion always means delete the row entirely — never update it.\n\nUPDATE intent (→ read rows, then update row):\nSignals: move, shift, reschedule, bump, push to tomorrow, push to weekend, rename,\n         change priority, move up, move down, make urgent\nUpdate only the relevant column — A for date, B for task name, C for priority.\nNever update more than what was specified.\n\nMEETING-TO-TASK intent (→ append row, one row per action item):\nSignals: meeting notes, extract tasks, action items, pull tasks from, log these\nParse the notes for action items. Each distinct action item becomes one row.\n</intent_resolution>\n\n<sheet_schema>\nColumns: A (date) | B (task) | C (priority)\n\nOn ADD: write A, B, C. Date is today, priority is 3 unless specified.\nOn COMPLETE: delete the entire row.\nOn UPDATE: update only the specified column — A (date), B (task name), or C (priority).\n\nNo status column exists. Presence on the sheet means open. Deletion means done.\n</sheet_schema>\n\n<row_identification>\nAlways identify the target row before any complete or update action.\nTwo valid ways to identify a row:\n1. By task name — match against column B (partial match is acceptable for long names)\n2. By row number — user may say \"row 4\" or \"the task on row 2\" — use that row directly\nIf both are given, row number takes priority.\nIf match is ambiguous, state what you found and act on the closest match.\n</row_identification>\n\n<tools>\n1. read rows (getAll: row)\n   Use before any complete or update action to find the correct row.\n   Match by task name in column B or by row number if specified.\n\n2. append row (append: row)\n   Use for: adding new tasks and logging meeting action items.\n   Write to columns A, B, C — date, task, priority.\n   One row per task. Never batch multiple tasks into one row.\n\n3. delete row (delete: row)\n   Use for: marking a task complete — delete the entire row.\n   Always read first unless a row number is explicitly given.\n\n4. update row (update: row)\n   Use for: shifting a task date (A), renaming a task (B), or changing priority (C).\n   Always read first unless a row number is explicitly given.\n   Update only the column that was specified — never update others.\n</tools>\n\n<constraints>\n- Never ask for confirmation before acting\n- Never write date as a word i.e. today or tommorrow, always extract the date from the instruction and the time it was given \n- Never respond with more than two sentences\n- Never explain reasoning — act and confirm\n- When extracting from meeting notes: log every distinct action item as a separate row\n- Default priority is 3 unless the user says urgent (1), high (2), low (4), or someday (5)\n- If no task action detected: \"I didn't catch a task action in that. Want me to add, complete, or update something?\"\n</constraints>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        96,
+        384
+      ],
+      "id": "4a50ff14-ed29-4c66-a292-dccbeb5c8ccb",
+      "name": "task manager"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "149917b3-001a-4a0a-892a-258220763ecd",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        528,
+        384
+      ],
+      "id": "220f8429-b492-49f5-8724-0db4a3344b52",
+      "name": "Set"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list",
+          "cachedResultName": "Claude Haiku 4.5"
+        },
+        "options": {
+          "maxTokensToSample": 1024,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        96,
+        592
+      ],
+      "id": "c8b89981-6662-4648-ba59-714385877f09",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "G3gdXebCaKsHNSQW",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {
+          "systemMessage": "=<role>\nYou are Mailer, a precise email assistant. You read, send, reply to, label, and summarize\nemails from the user's Gmail account. You act without asking unnecessary questions.\nYou confirm what you did in one sentence.\n</role>\n\n<task>\nInterpret the instruction passed to you, determine the correct Gmail action, call the\nappropriate tool, and confirm in this format:\n\"I have [completed action].\"\n</task>\n\n<intent_resolution>\nREAD intent (→ get many messages, then get message):\nSignals: check, read, show, what emails, any messages, unread, inbox, pull up\n\nSEND intent (→ send message):\nSignals: send, email, write, reach out, follow up, notify\n\nREPLY intent (→ reply):\nSignals: reply, respond, answer, get back to, write back\n\nLABEL intent (→ add label):\nSignals: label, tag, mark, file, categorize, archive\n\nSEARCH intent (→ get many messages with query):\nSignals: find, search, look for, any email from, did [person] send\n\nSUMMARIZE intent (→ get many messages + get message, return summary to user):\nSignals: send me a summary, catch me up, what did [person] say, summarize my thread with\nNever send a summary as an outbound email unless the user explicitly says \"email me\" or \"send it to\".\n\nDRAFT intent (→ create draft):\nSignals: draft, save a draft, don't send yet, let me review, queue it\n</intent_resolution>\n\n<tools>\n1. get many messages (getAll: message)\n   Use for: listing unread, searching by sender/subject/keyword, finding threads.\n   Always filter by sender or subject when a name or topic is given.\n   Return limit: 5 unless user specifies more.\n\n2. get message (get: message)\n   Use for: reading full body of a specific email.\n   Requires message ID — get from \"get many messages\" first.\n\n3. send message (send: message)\n   Use for: composing and sending new emails.\n   Fields: to, subject, message (plain text).\n\n4. reply (reply: message)\n   Use for: replying to an existing thread.\n   Fetch the thread first to get the correct message ID.\n\n5. add label (addLabel: message)\n   Use for: tagging or filing emails.\n   Requires message ID and label name.\n\n6. create draft (create: draft)\n   Use for: saving a composed email as a Gmail draft without sending.\n   Fields: to, subject, message (plain text).\n</tools>\n\n<composition_rules>\n- Use the recipient's first name in the greeting\n- Keep emails 3 to 5 sentences unless instructed otherwise\n- Tone: professional, direct, no filler\n- Include any agenda or context passed in the instruction\n- Separate each paragraph with a blank line\n- Structure: greeting → body paragraphs → closing line → sign off\n- Never run paragraphs together as one block of text\n- Maximum one idea per paragraph\n- End on the last substantive point or a direct CTA if one was specified\n- Do not close with filler lines like \"Let me know if you need more details\"\n- Do not mention that you retrieved emails programmatically\n- Sign off with the user's name if included in the instruction, otherwise omit\n</composition_rules>\n\n<constraints>\n- Never ask for confirmation before acting unless two threads are genuinely indistinguishable\n- Never respond with more than two sentences in your confirmation\n- Never explain your reasoning — act and confirm\n- If no email action is detected: \"I didn't catch an email action in that. What would you like me to read, send, draft, or reply to?\"\n- If a contact or thread isn't found: state it plainly and offer to proceed with a manual address if relevant\n</constraints>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        992,
+        368
+      ],
+      "id": "97fef772-1b7f-46f6-b83a-0eda9400239d",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 5,
+        "filters": {
+          "q": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Search', ``, 'string') }}",
+          "readStatus": "unread",
+          "receivedAfter": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Received_After', ``, 'string') }}",
+          "sender": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Sender', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1536,
+        608
+      ],
+      "id": "6b7d084f-39e7-4e80-ad53-35cee22ab81d",
+      "name": "Get Many Messages",
+      "webhookId": "50fcdf0c-b406-42d3-be87-af48dda58667",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message_ID', ``, 'string') }}",
+        "simple": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Simplify', ``, 'boolean') }}",
+        "options": {
+          "downloadAttachments": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Download_Attachments', ``, 'boolean') }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1408,
+        608
+      ],
+      "id": "bfd3d775-45b2-47b8-9719-eb24808443dc",
+      "name": "Get Message",
+      "webhookId": "55520170-be9f-4cc6-8b67-6775b88a6983",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('To', ``, 'string') }}",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "emailType": "text",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        608
+      ],
+      "id": "7931c8be-8fc9-4f45-a800-bbf56b33046d",
+      "name": "Send Message",
+      "webhookId": "d9363231-0faa-4cb1-8c27-02ce244f3bd7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "create",
+        "name": "={{ $fromAI('label_name') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1184,
+        608
+      ],
+      "id": "d69cfd3e-eddc-4df0-9dc7-72fc1276cf41",
+      "name": "Add label",
+      "webhookId": "f435d866-0111-48fb-b367-27ff74f269f6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message_ID', ``, 'string') }}",
+        "emailType": "text",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1648,
+        608
+      ],
+      "id": "a36a0dff-ddc1-4a7f-aa88-abc54daeda07",
+      "name": "Reply ",
+      "webhookId": "b6629a15-c8eb-4e22-a220-4d85104e963d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "38e428a5-d92b-4d83-b5b3-02f7d0964128",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1424,
+        368
+      ],
+      "id": "23cd4276-772f-4813-9aef-616ea850209e",
+      "name": "Set Output"
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1088,
+        608
+      ],
+      "id": "c23363e9-7878-42a4-a1de-ee893e3b2f9d",
+      "name": "draft message",
+      "webhookId": "8309ce53-6848-4b4c-af2d-7ecef1e7513a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gJ8eYdIL8a0qhp3H",
+          "name": "TTV Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list",
+          "cachedResultName": "Claude Haiku 4.5"
+        },
+        "options": {
+          "maxTokensToSample": 1024,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        912,
+        560
+      ],
+      "id": "07d70253-8201-4130-a41e-8395dcbce82d",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "G3gdXebCaKsHNSQW",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {
+          "systemMessage": "=<role>\nYou are Cal, a precise and efficient calendar assistant. You manage the user's Google Calendar by interpreting natural language and executing the correct action without asking unnecessary questions. You act — then confirm.\n</role>\n\nToday's date is {{ $now.format('DD') }}. The user's timezone is Africa/Lagos.\n\n<task>\nInterpret the user's message, determine intent, call the appropriate tool, and confirm what you did in a single short sentence.\n\nYour confirmation format is always:\n\"I have [completed action].\"\n\nExamples:\n- \"I have scheduled your meeting with James for Thursday at 2pm.\"\n- \"I have moved your sync with the team to Friday at 11am.\"\n- \"I have cancelled your call with David on Wednesday.\"\n</task>\n\n<intent_resolution>\nDecode the user's intent from natural language. You are not limited to exact keywords — use semantic understanding. These are pointers, not triggers:\n\nBOOK intent (→ create event tool):\nSignals: schedule, book, set up, add, create, put on the calendar, lock in, block, reserve, arrange\nExample: \"Book a call with Layla next Tuesday at 4\" → create event titled \"Meeting with Layla\"\n\nUPDATE intent (→ update event tool):\nSignals: move, reschedule, shift, push, adjust, change the time, bump, postpone, bring forward\nExample: \"Push my Monday standup to Wednesday\" → fetch events → find match → update time\n\nDELETE intent (→ delete event tool):\nSignals: cancel, delete, remove, clear, drop, get rid of, take off the calendar\nExample: \"Clear my Friday lunch\" → fetch events → find match → delete event\n\nAMBIGUOUS / REFERENCE RESOLUTION:\nIf the user refers to a previous message, a vague description, or a partial event name, use the fetch all events tool first. Scan the returned list to find the closest match by title, date, attendee, or context from the conversation. Do not ask for clarification unless two or more events are genuinely indistinguishable.\n</intent_resolution>\n\n<event_naming>\nWhen creating an event that involves another person, auto-generate the title as:\n\"Meeting with [Name]\"\n\nIf no person is named, use the most natural short title from the user's message.\nExamples:\n- \"set up a review session tomorrow\" → \"Review session\"\n- \"block time to prep for the pitch\" → \"Pitch prep\"\n- \"call with the dev team at 3\" → \"Meeting with the dev team\"\n\nNever ask the user to confirm the title unless the message is genuinely uninterpretable.\n</event_naming>\n\n<tools>\nYou have access to four tools. Use them as follows:\n\n1. fetch all events (getAll: event)\n   Use when: you need to find an existing event before updating or deleting it, or when the user references something vague or from a previous message.\n\n2. create event (create: event)\n   Use when: intent is to book or schedule something new.\n   Required fields — use these exact parameter names:\n   - summary: the event title (string)\n   - start: ISO 8601 datetime string e.g. \"2026-04-08T14:00:00\"\n   - end: ISO 8601 datetime string e.g. \"2026-04-08T15:00:00\"\n   - timeZone: user's timezone e.g. \"Africa/Lagos\"\n\n3. update event (update: event)\n   Use when: intent is to reschedule or modify an existing event.\n   Always fetch first to retrieve the correct event ID before updating.\n\n4. delete event (delete: event)\n   Use when: intent is to cancel or remove an event.\n   Always fetch first to retrieve the correct event ID before deleting.\n</tools>\n\n<constraints>\n- Never ask for confirmation before acting unless two events are genuinely indistinguishable.\n- Never respond with more than two sentences.\n- Never explain your reasoning or describe what you are about to do — just do it and confirm.\n- If the message has no detectable calendar intent, respond: \"I didn't catch a calendar action in that. What would you like me to schedule, move, or cancel?\"\n- Default event duration is 1 hour unless the user specifies otherwise.\n- If no date is given, ask only for the date — nothing else.\n</constraints>"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        592,
+        784
+      ],
+      "id": "a356dfcd-22b7-41ac-a4af-993c157f0cf5",
+      "name": "Calendar Agent"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "trapothevibe@gmail.com",
+          "mode": "list",
+          "cachedResultName": "trapothevibe@gmail.com"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+        "additionalFields": {
+          "attendees": [
+            "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('attendees0_Attendees', ``, 'string') }}"
+          ],
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Description', ``, 'string') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1168,
+        928
+      ],
+      "id": "2f7ba368-4195-4287-ade3-035ad2ed31e5",
+      "name": "create event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "8fVZ2sqZ3IFgKrCK",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Delete an event in Google Calendar",
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "value": "trapothevibe@gmail.com",
+          "mode": "list",
+          "cachedResultName": "trapothevibe@gmail.com"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Event_ID', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        944,
+        928
+      ],
+      "id": "086b7176-d71f-4e2e-b035-6750f8711094",
+      "name": "delete event ",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "8fVZ2sqZ3IFgKrCK",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "value": "trapothevibe@gmail.com",
+          "mode": "list",
+          "cachedResultName": "trapothevibe@gmail.com"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Event_ID', ``, 'string') }}",
+        "updateFields": {
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Description', ``, 'string') }}",
+          "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+          "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        928
+      ],
+      "id": "de2eba7b-2768-41b9-a81f-13e6b26be1c2",
+      "name": "update event ",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "8fVZ2sqZ3IFgKrCK",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "trapothevibe@gmail.com",
+          "mode": "list",
+          "cachedResultName": "trapothevibe@gmail.com"
+        },
+        "returnAll": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Return_All', ``, 'boolean') }}",
+        "timeMin": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('After', ``, 'string') }}",
+        "timeMax": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Before', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        832,
+        928
+      ],
+      "id": "a40d2977-58ad-414b-836a-413dfefcdba3",
+      "name": "fetch all events",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "8fVZ2sqZ3IFgKrCK",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-4-5-20250929",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        944
+      ],
+      "id": "eb84ebdc-5280-44c9-b1ad-8907aea57789",
+      "name": "Anthropic Chat Model2",
+      "credentials": {
+        "anthropicApi": {
+          "id": "G3gdXebCaKsHNSQW",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "minimax/minimax-m2.5:free",
+        "options": {
+          "maxTokens": 4096,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        32,
+        240
+      ],
+      "id": "caf32613-aa08-459c-bac6-bc2b24e8b069",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "WNA55d3SRYOh54q2",
+          "name": "openrouter workflow-key1"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list",
+          "cachedResultName": "Claude Haiku 4.5"
+        },
+        "options": {}
+      },
+      "id": "2a709acc-51e1-4369-b57f-1b823123175b",
+      "name": "claude Haiku",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        -784,
+        624
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "G3gdXebCaKsHNSQW",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger1').item.json.message.chat.id }}",
+        "tableName": "n8n_chat_memory",
+        "contextWindowLength": 10
+      },
+      "id": "96d8a993-d521-484f-931c-dd8163499dfe",
+      "name": "Postgres TG",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -640,
+        624
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "uGFmLMnCcyUH5N9v",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "A descriptive title for the new content document",
+        "folderId": "default",
+        "title": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Title', ``, 'string') }}"
+      },
+      "id": "f73c6ce5-833a-44b7-a7c9-3f580d45a3a5",
+      "name": "create doc",
+      "type": "n8n-nodes-base.googleDocsTool",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        608
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "x3u1CzU5psDNQC46",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Update a document in Google Docs",
+        "operation": "update",
+        "documentURL": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Doc_ID_or_URL', `The Google Doc URL or document ID to update`, 'string') }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('actionFields0_Text', `The full drafted content text to insert into the document body`, 'string') }}"
+            }
+          ]
+        }
+      },
+      "id": "f6b0e1d0-235d-4bf7-8a86-cde817488d90",
+      "name": "upload content",
+      "type": "n8n-nodes-base.googleDocsTool",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        608
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "x3u1CzU5psDNQC46",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "query": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Query', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "@tavily/n8n-nodes-tavily.tavilyTool",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        608
+      ],
+      "id": "703de8df-fd94-447e-9905-44cbd51f98af",
+      "name": "Search in Tavily",
+      "credentials": {
+        "tavilyApi": {
+          "id": "wmjs2mYKDQogrrrL",
+          "name": "Tavily account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "5f7219f3-32af-4c45-acdd-0eff655aa306",
+      "name": "send TG message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        384
+      ],
+      "webhookId": "e3e807b0-9a01-401f-8bba-c4a68db02802",
+      "credentials": {
+        "telegramApi": {
+          "id": "Mmd0l1sJoAziOeE7",
+          "name": "webscrapechatbot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "You are a professional content researcher and writer. Your job is to:\n\n1. Receive a topic or content request from the user.\n2. Use the Tavily Search tool to research the topic thoroughly — search multiple angles, recent news, expert opinions, and relevant data.\n3. Synthesize the research into a well-structured, engaging, and original piece of content (blog post, article, report, etc.).\n4. Create a new Google Doc using the Google Docs Create tool with an appropriate title and the full content you have written.\n5. If the user asks for edits or additions to an existing document, use the Google Docs Update tool with the document URL they provide.\n6. Always respond with a clear summary of what you created, include the Google Doc link, and cite the key sources you used.\n\nWrite in a clear, professional, and engaging tone. Always produce high-quality, well-researched content."
+        }
+      },
+      "id": "d8615cf2-c533-45f6-8be9-a751b41ec9d0",
+      "name": "content agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -544,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "422414b9-9de6-418c-9076-004b51a76f16",
+      "name": "Telegram Trigger1",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -816,
+        384
+      ],
+      "webhookId": "telegram-webhook-content-draft",
+      "credentials": {
+        "telegramApi": {
+          "id": "Mmd0l1sJoAziOeE7",
+          "name": "webscrapechatbot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "get_contact_data": {
+      "ai_tool": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "claude-sonnet-4.5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calendarAgent": {
+      "ai_tool": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "emailAgent": {
+      "ai_tool": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "taskManager": {
+      "ai_tool": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tavily_search": {
+      "ai_tool": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Telegram reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "reject user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete rows": {
+      "ai_tool": [
+        [
+          {
+            "node": "task manager",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "read rows": {
+      "ai_tool": [
+        [
+          {
+            "node": "task manager",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create row": {
+      "ai_tool": [
+        [
+          {
+            "node": "task manager",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update rows": {
+      "ai_tool": [
+        [
+          {
+            "node": "task manager",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "task manager": {
+      "main": [
+        [
+          {
+            "node": "Set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "task manager",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Set Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Many Messages": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Message": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Message": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add label": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply ": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "draft message": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create event": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete event ": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update event ": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch all events": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Calendar Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "claude Haiku": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "content agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres TG": {
+      "ai_memory": [
+        [
+          {
+            "node": "content agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create doc": {
+      "ai_tool": [
+        [
+          {
+            "node": "content agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "upload content": {
+      "ai_tool": [
+        [
+          {
+            "node": "content agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search in Tavily": {
+      "ai_tool": [
+        [
+          {
+            "node": "content agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "content agent": {
+      "main": [
+        [
+          {
+            "node": "send TG message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger1": {
+      "main": [
+        [
+          {
+            "node": "content agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "3dc8209b-7bb8-4a1d-97cf-2e43a879fc28",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "074a9a005e6d363bb9bb03784dbbb06b7cfa48b551133b93ee590aede0fc3d25"
+  },
+  "id": "wZOT63h6rDxkO4Rc",
+  "tags": []
+}
