@@ -145,9 +145,11 @@ Message `@userinfobot` on Telegram — it returns your numeric user ID to add to
 
 ```
 butler-agent/
-├── chiefAgent.json     # Full n8n workflow export
-└── README.md
-└── assets
+├── chiefAgent.json        # Full n8n workflow export
+├── README.md
+└── assets/
+    └── chiefAgent overview.png       # Workflow canvas screenshot
+
 ```
 
 ---
